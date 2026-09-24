@@ -396,3 +396,29 @@ function glitch(c, t, k, S) {
   if (k > 0.5) { c.save(); c.globalAlpha = 0.15 * k; c.globalCompositeOperation = 'lighter'; c.drawImage(cv, 2 * S, 0); c.restore(); }
 }
 function shadow(c, x, y, w = 14) { c.save(); c.globalAlpha = 0.35; ell(c, x, y, w, 2.5, '#000'); c.restore(); }
+
+// anime speed background: coloured field with streaking lines
+function speedBG(c, t, o = {}) {
+  const cols = o.cols || ['#183090', '#3060d0', '#a0c8ff'];
+  const a = o.alpha === undefined ? 1 : o.alpha;
+  if (a <= 0) return;
+  c.save(); c.globalAlpha = a;
+  vgrad(c, 0, 0, W, H, [cols[0], cols[1], cols[0]]);
+  const f = frameOf(t);
+  for (let i = 0; i < 70; i++) {
+    const len = rr(i, 301, 30, 160), y = rr(i, 302, 0, H), sp = rr(i, 303, 700, 1400);
+    const x = (((rr(i, 304, 0, W + len) - t * sp * (o.dir || 1)) % (W + len)) + W + len) % (W + len) - len;
+    R(c, x, y, len, rnd(i, 305) > 0.8 ? 2 : 1, i % 3 ? cols[2] : '#ffffff');
+  }
+  void f;
+  c.restore();
+}
+// instant-transmission streak
+function zipFx(c, x1, y1, x2, y2, lt, col = '#ffffff') {
+  const k = 1 - lt / 0.22;
+  if (k <= 0) return;
+  c.save(); c.globalAlpha = k;
+  for (let i = -1; i <= 1; i++) tline(c, x1, y1 + i * 6, x2, y2 + i * 6, i ? 1 : 2, i ? col : '#ffffff');
+  for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; tline(c, x2 + Math.cos(a) * 6, y2 + Math.sin(a) * 6, x2 + Math.cos(a) * (10 + lt * 60), y2 + Math.sin(a) * (10 + lt * 60), 1, col); }
+  c.restore();
+}

@@ -281,6 +281,10 @@ const POSES = {
   laugh: { y: 0, lean: -14, tF: 12, sF: 0, tB: -12, sB: 0, aF: 20, fF: 120, aB: 15, fB: 125, head: -12 },
   drink: { y: 13, lean: -6, tF: 88, sF: 85, tB: 80, sB: 80, aF: 110, fF: 110, aB: -30, fB: 20, head: -10 },
   eat: { y: 0, lean: 0, tF: 8, sF: 0, tB: -8, sB: 0, aF: 60, fF: 120, aB: 10, fB: 30, head: -2 },
+  flyIdle: { y: 0, lean: 10, tF: 45, sF: 70, tB: 10, sB: 80, aF: 60, fF: 95, aB: 45, fB: 105, head: 0 },
+  hammer: { y: 0, lean: 22, tF: 30, sF: 45, tB: -10, sB: 45, aF: 35, fF: -15, aB: 30, fB: -10, head: 6 },
+  knee: { y: -2, lean: -6, tF: 110, sF: 125, tB: -10, sB: 20, aF: 40, fF: 100, aB: -30, fB: 40, head: -3 },
+  dive: { y: 0, lean: 70, tF: -10, sF: 10, tB: -22, sB: 20, aF: 165, fF: 0, aB: 150, fB: 0, head: 20 },
   guard: { y: 2, lean: 6, tF: 24, sF: 18, tB: -20, sB: 12, aF: 75, fF: 100, aB: 55, fB: 110, head: 2 },
 };
 function mixPose(a, b, k) {
@@ -440,11 +444,12 @@ function drawChar(c, key, x, y, st = {}) {
   }
   const alpha = st.alpha === undefined ? 1 : st.alpha;
   if (st.rot) {
-    // rotate about feet (used for lying down)
+    // rotate about feet (lying down) or body centre (tumbling, rotC)
+    const oy = st.rotC ? 30 : 0;
     c.save(); c.globalAlpha = alpha;
-    c.translate(Math.round(x), Math.round(y)); c.rotate(st.rot);
+    c.translate(Math.round(x), Math.round(y - oy)); c.rotate(st.rot);
     if (dir < 0) c.scale(-1, 1);
-    c.drawImage(_O, -ROOTX, -ROOTY);
+    c.drawImage(_O, -ROOTX, -ROOTY + oy);
     c.restore();
   } else blit(c, _O, x - ROOTX * s, y - ROOTY * s, { flip: dir < 0, alpha, s });
   // convert body-local info to world

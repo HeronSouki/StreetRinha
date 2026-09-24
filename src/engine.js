@@ -8,16 +8,17 @@ const SCENES = [];
 let TOTAL = 0;
 const AEV = []; // audio events: {t, type:'sfx'|'music', name, p, dur}
 
-function scene(name, dur, build) {
-  const t0 = TOTAL;
+// speed > 1 plays the scene faster (visuals and audio cues together)
+function scene(name, dur, build, o = {}) {
+  const t0 = TOTAL, sp = o.speed || 1;
   const A = {
     t0,
-    sfx: (lt, n, p = {}) => AEV.push({ t: t0 + lt, type: 'sfx', name: n, p }),
-    music: (lt, dur, n, p = {}) => AEV.push({ t: t0 + lt, type: 'music', name: n, dur, p }),
+    sfx: (lt, n, p = {}) => AEV.push({ t: t0 + lt / sp, type: 'sfx', name: n, p: p.dur ? Object.assign({}, p, { dur: p.dur / sp }) : p }),
+    music: (lt, dur, n, p = {}) => AEV.push({ t: t0 + lt / sp, type: 'music', name: n, dur: dur / sp, p }),
   };
   const fn = build(A);
-  SCENES.push({ name, t0, dur, fn });
-  TOTAL += dur;
+  SCENES.push({ name, t0, dur: dur / sp, fn: sp === 1 ? fn : (lt, F) => fn(lt * sp, F) });
+  TOTAL += dur / sp;
 }
 
 const WB = mkCanvas(W, H); // world buffer (320x180)
@@ -41,7 +42,9 @@ function renderAt(t, out) {
   const z = Math.max(1, F.cam.z), sw = W / z, sh = H / z;
   const x0 = clamp(F.cam.x - sw / 2, 0, W - sw), y0 = clamp(F.cam.y - sh / 2, 0, H - sh);
   const q = v => Math.round(v * S) / S;
+  if (F.filter) c.filter = F.filter;
   c.drawImage(WB, q(x0), q(y0), sw, sh, Math.round(F.cam.sx * S), Math.round(F.cam.sy * S), out.width, out.height);
+  c.filter = 'none';
   UB.x.clearRect(0, 0, W, H);
   UB.x.globalAlpha = 1;
   for (const u of F.ui) u(UB.x);
@@ -66,6 +69,7 @@ class Fight {
     for (const id in o.fighters) this.F[id] = Object.assign({ dir: 1, hp: 100, max: 100, y: GROUND, expr: {}, side: 'L', idle: 'idle' }, o.fighters[id]);
     this.paths = {}; this.over = {}; this.acts = []; this.fxs = []; this.uis = []; this.hits = []; this.sets = [];
     this.shakes = []; this.flashes = []; this.hitFx = o.hitFx !== false;
+    this.impacts = []; this.zooms = [];
     this.hudOpts = o.hud || {};
     this.bannerY = o.bannerY;
   }
@@ -85,12 +89,133 @@ class Fight {
   hpSet(id, t, v, dur = 0.01) { this.sets.push({ id, t, v, dur }); }
   shake(t, amp, dur) { this.shakes.push({ t, amp, dur }); }
   flash(t, dur, col = '#ffffff', a = 0.9) { this.flashes.push({ t, dur, col, a }); }
+  // DBZ-style impact frames (inverted / high-contrast for n frames)
+  impact(t, n = 3) { this.impacts.push({ t, n }); this.shake(t, 6, 0.4); }
+  zoom(t, dur, z, id) { this.zooms.push({ t, dur, z, id }); }
+
+  // ------------------------------------------------ choreography
+  // move fighter from wherever it is at t to (x,y) over dur (call in time order per fighter)
+  go(id, t, x, y, dur = 0.2, ease = 'ioQ') {
+    const P = (this.paths[id] = this.paths[id] || []);
+    const b = this.base(id, t);
+    P.push([t, b.x, b.y]); P.push([t + dur, x, y === undefined || y === null ? b.y : y, ease]);
+    P.sort((p, q) => p[0] - q[0]);
+    return this;
+  }
+  hold(id, t, dur) { const b = this.base(id, t); return this.go(id, t, b.x, b.y, dur, 'lin'); }
+  // instant transmission
+  tp(id, t, x, y) {
+    const b = this.base(id, t);
+    this.go(id, t, x, y, 0.001, 'lin');
+    const col = this.F[id].ghost || '#ffffff';
+    this.fx(t, t + 0.22, (c, lt) => zipFx(c, b.x, b.y - 30, x, (y ?? b.y) - 30, lt, col));
+    this.A.sfx(t, 'zip');
+    return this;
+  }
+  // knock `id` flying to (x,y); crash fx if it lands on the ground
+  launch(t, id, by, x, y, dur = 0.35, o = {}) {
+    if (o.hit !== false) this.hit({ t, to: id, by, dmg: o.dmg ?? 4, big: true, kb: 0, lift: 0, noNum: o.noNum });
+    this.go(id, t, x, y, dur, o.ease || 'outQ');
+    const spin = o.spin ?? 14;
+    this.pose(id, t, t + dur, (lt) => ({ pose: 'launch', rot: spin ? lt * spin * (x > this.base(id, t).x ? 1 : -1) : 0, rotC: true, expr: { eyes: 'shock', mouth: 'shout' } }));
+    if (y >= GROUND - 1 && o.crash !== false) {
+      const te = t + dur;
+      this.fx(te, te + 0.9, (c, lt) => { dust(c, x - 12, GROUND, lt, { col: '#d0c0a0' }); dust(c, x + 12, GROUND, lt, { col: '#d0c0a0' }); groundCracks(c, x, GROUND + 2, Math.min(1, lt * 6), Math.floor(te * 10)); ringFx(c, x, GROUND - 2, lt, { r: 40, th: 3, dur: 0.35 }); }, 'back');
+      this.shake(te, 5, 0.4);
+      this.A.sfx(te, 'crash');
+      this.pose(id, te, te + (o.down ?? 0.35), () => ({ pose: 'kneel', expr: { eyes: 'tired', mouth: 'open', sweat: true } }));
+    }
+    return this;
+  }
+  // both fighters meet and trade blows at high speed
+  exchange(t, dur, a, b, o = {}) {
+    const cx = o.x ?? 160, cy = o.y ?? GROUND, gap = o.gap ?? 32, rate = o.rate ?? 12;
+    const aLeft = this.base(a, t).x <= this.base(b, t).x;
+    const ax = cx + (aLeft ? -1 : 1) * gap / 2, bx = cx + (aLeft ? 1 : -1) * gap / 2;
+    const reach = o.reach ?? 0.14;
+    this.go(a, t, ax, cy, reach, 'outQ').hold(a, t + reach, dur - reach);
+    this.go(b, t, bx, cy, reach, 'outQ').hold(b, t + reach, dur - reach);
+    const SEQ = ['punch', 'kick', 'punch2', 'upper', 'punch', 'knee'];
+    const mk = (id, par, side) => (lt, s) => {
+      if (lt < reach) return { pose: 'dash', expr: { eyes: 'angry', mouth: 'shout' } };
+      const k = Math.floor((lt - reach) * rate);
+      const atk = (k + par) % 2 === 0;
+      const push = Math.sin((lt - reach) * rate * Math.PI) * 3;
+      return { pose: atk ? SEQ[(k + par * 3) % SEQ.length] : ((k >> 1) % 2 ? 'block' : 'guard'), x: s.x + side * (atk ? push : -push * 0.5), y: s.y + (cy < GROUND ? Math.sin(lt * 9 + par) * 2 : 0), expr: { eyes: 'angry', mouth: atk ? 'shout' : 'grin' } };
+    };
+    this.act(a, t, t + dur, mk(a, 0, aLeft ? 1 : -1));
+    this.act(b, t, t + dur, mk(b, 1, aLeft ? -1 : 1));
+    const n = Math.floor((dur - reach) * rate);
+    for (let k = 0; k < n; k++) {
+      const tk = t + reach + k / rate + 0.02;
+      const at = [cx + rr(k, t * 10, -4, 4), cy - 32 + rr(k, t * 10 + 1, -10, 8)];
+      this.fx(tk, tk + 0.3, (c, lt) => { if (k % 2 === 0) ringFx(c, at[0], at[1], lt, { r: 13, th: 2, dur: 0.18 }); spark(c, at[0], at[1], lt, { size: 0.7, col: k % 2 ? '#ffe060' : '#ffffff', dur: 0.15 }); });
+      this.hit({ t: tk, to: k % 2 ? a : b, by: k % 2 ? b : a, dmg: o.chip ?? 0.4, block: true, noNum: true, noSpark: true, sfx: false, at });
+      this.A.sfx(tk, 'clash', { v: 0.6 + (k % 3) * 0.15 });
+      this.shake(tk, 1.5, 0.08);
+    }
+    if (o.win) {
+      const w = o.win, l = w === a ? b : a, te = t + dur;
+      this.act(w, te, te + 0.3, () => ({ pose: o.finisher || 'upper', expr: { eyes: 'angry', mouth: 'shout' } }));
+      const [lx, ly, ld] = o.launch || [this.base(l, te).x + (l === (aLeft ? b : a) ? 70 : -70), GROUND, 0.35];
+      this.launch(te + 0.02, l, w, lx, ly, ld, { dmg: o.dmg ?? 5 });
+      this.impact(te + 0.02, 3);
+    }
+    return this;
+  }
+  // `a` pummels `b` from every side while `b` drifts to `to`
+  rush(t, dur, a, b, o = {}) {
+    const gap = o.gap ?? 0.09, n = Math.floor(dur / gap);
+    const b0 = this.base(b, t), to = o.to || [b0.x + 40, b0.y];
+    this.go(b, t, to[0], to[1], dur, 'lin');
+    const at = (T) => this.base(b, T);
+    const SEQ = ['punch', 'kick', 'punch2', 'upper', 'knee', 'hammer'];
+    for (let i = 0; i < n; i++) {
+      const ti = t + i * gap;
+      const v = at(ti + gap * 0.5), ang = rr(i, t * 7, -1, 1) * 2.4 + (i % 2 ? Math.PI : 0);
+      const px = v.x + Math.cos(ang) * 24, py = Math.min(GROUND, v.y + Math.sin(ang) * 16);
+      this.go(a, ti, px, py, 0.02, 'lin');
+      this.hit({ t: ti + 0.03, to: b, by: a, dmg: (o.dmg ?? 14) / n, big: false, kb: 1.5, sfx: i % 2 === 0, vol: 0.8, col: o.sparkCol || '#ffffff' });
+    }
+    this.act(a, t, t + dur, (lt) => ({ pose: SEQ[Math.floor(lt / gap) % SEQ.length], expr: { eyes: 'angry', mouth: 'shout' }, aura: o.aura ? { col: o.aura, t: lt, amp: 2, alpha: 0.45 } : null }));
+    this.pose(b, t, t + dur, (lt) => ({ pose: Math.floor(lt / gap) % 2 ? 'hit' : 'hit2', expr: { eyes: 'shock', mouth: 'open' }, flash: Math.floor(lt / gap * 2) % 4 === 0 ? 1 : 0 }));
+    if (o.bg) this.fx(t, t + dur, (c, lt) => speedBG(c, lt, { alpha: Math.min(1, lt / 0.12) * (1 - prog(dur - 0.1, dur, lt)), cols: o.bg }), 'back');
+    for (let i = 0; i < n; i += 6) this.impact(t + i * gap + 0.03, 2);
+    this.zoom(t, dur, 1.45, b);
+    return this;
+  }
+  // too fast to see: fighters vanish, shockwaves pop all over the screen
+  blitz(t, dur, ids, o = {}) {
+    for (const id of ids) this.pose(id, t, t + dur, () => ({ hide: true }));
+    const n = Math.floor(dur * (o.rate ?? 9));
+    for (let i = 0; i < n; i++) {
+      const ti = t + i / (o.rate ?? 9);
+      const p = [rr(i, t * 3, 40, 280), rr(i, t * 3 + 1, 50, 150)];
+      this.fx(ti, ti + 0.35, (c, lt) => {
+        ringFx(c, p[0], p[1], lt, { r: 30, th: 4, dur: 0.3 });
+        spark(c, p[0], p[1], lt, { size: 1.2, col: '#ffffff' });
+        if (lt < 0.12) for (let j = 0; j < 2; j++) { const q = [p[0] + rr(i, j + 9, -30, 30), p[1] + rr(i, j + 11, -20, 20)]; tline(c, q[0] - 10, q[1], q[0] + 10, q[1], 1, j ? (o.colB || '#c080ff') : (o.colA || '#ff6060')); }
+      });
+      this.A.sfx(ti, 'clash', { v: 0.9 });
+      this.shake(ti, 2, 0.1);
+      if (i % 4 === 3) this.impact(ti, 2);
+    }
+    return this;
+  }
+  // scale all damage dealt to `id` so its HP ends at `end` (by time T)
+  fitHP(id, end, T = 1e9) {
+    const f = this.F[id];
+    const dmg = this.hits.filter(h => h.to === id && !h.heal && h.t <= T).reduce((a, h) => a + h.dmg, 0);
+    const heal = this.hits.filter(h => h.to === id && h.heal && h.t <= T).reduce((a, h) => a + h.dmg, 0);
+    const k = (f.hp + heal - end) / Math.max(1e-6, dmg);
+    for (const h of this.hits) if (h.to === id && !h.heal && h.t <= T) h.dmg *= k;
+  }
   say(t, id, str, dur = 1.8, o = {}) {
     this.ui(t, t + dur, (u, lt, T) => { const s = this.st(id, T); const hp = camXY(this._F, ...(o.at || [s.x + (o.dx || 0), s.y - 64 + (o.dyAnchor || 0)])); bubble(u, str, hp[0], hp[1], lt, dur, o); });
     if (o.sfx !== false) this.A.sfx(t, o.shout ? 'shout' : 'talk', {});
   }
   banner(t, str, side, o = {}) {
-    this.ui(t, t + (o.dur || 1.9), (u, lt) => moveBanner(u, str, lt, Object.assign({ side, y: this.bannerY }, o)));
+    (this.banners = this.banners || []).push({ t, str, o: Object.assign({ side, y: this.bannerY }, o) });
     this.A.sfx(t, 'banner', {});
   }
   // ------------------------------------------------ queries
@@ -140,8 +265,20 @@ class Fight {
     const f = this.F[id];
     const b = this.base(id, T);
     const s = { id, key: f.key, x: b.x, y: b.y, dir: b.dir, pose: f.idle, expr: Object.assign({}, f.expr), flash: 0, aura: null, alpha: 1, t: T, hide: false };
-    // idle bob
-    if (s.pose === 'idle') s.pose = Object.assign({}, POSES.idle, { y: POSES.idle.y + Math.round(Math.sin(T * 6 + (f.side === 'L' ? 0 : 2)) * 1) });
+    // face the opponent
+    if (f.foe && this.F[f.foe]) { const fo = this.base(f.foe, T); if (Math.abs(fo.x - s.x) > 2) s.dir = fo.x > s.x ? 1 : -1; }
+    // speed: dash poses + afterimages
+    const b0 = this.base(id, T - 0.034), vx = (b.x - b0.x) / 0.034, vy = (b.y - b0.y) / 0.034;
+    const airborne = s.y < GROUND - 4;
+    if (Math.hypot(vx, vy) > 240 && !f.noAuto) {
+      if (Math.abs(vx) > 80) s.dir = vx > 0 ? 1 : -1;
+      s.pose = Math.abs(vy) > Math.abs(vx) * 1.4 ? (vy < 0 ? 'upper' : 'dive') : 'dash';
+      s.after = [1, 2, 3].map(k => { const g = this.base(id, T - k * 0.03); return { dx: g.x - s.x, dy: g.y - s.y, alpha: 0.55 - k * 0.13, col: f.ghost || '#a0c0ff' }; });
+      s.fast = true;
+    } else if (s.pose === 'idle') {
+      const bob = Math.round(Math.sin(T * 6 + (f.side === 'L' ? 0 : 2)) * 1);
+      s.pose = airborne ? Object.assign({}, POSES.flyIdle, { y: bob * 2 }) : Object.assign({}, POSES.idle, { y: POSES.idle.y + bob });
+    }
     // hit reaction
     const h = this.lastHit(id, T);
     if (h && !h.block) {
@@ -178,8 +315,8 @@ class Fight {
   drawFighter(c, id, T, extra = {}) {
     const s = this.st(id, T);
     if (s.hide) return s;
-    if (!s.noShadow) shadow(c, s.x, GROUND + 1, 13 * (s.y < GROUND - 30 ? 0.6 : 1));
-    drawChar(c, s.key, Math.round(s.x + (s.hitK ? jit(T, 9, 1) : 0)), Math.round(s.y), Object.assign({ pose: s.pose, expr: s.expr, dir: s.dir, flash: s.flash, aura: s.aura, alpha: s.alpha, t: T, flap: s.flap, after: s.after, rot: s.rot, silhouette: s.silhouette, hold: s.hold }, extra));
+    if (!s.noShadow) shadow(c, s.x, GROUND + 1, 13 * clamp(1 - (GROUND - s.y) / 140, 0.35, 1));
+    drawChar(c, s.key, Math.round(s.x + (s.hitK ? jit(T, 9, 1) : 0)), Math.round(s.y), Object.assign({ pose: s.pose, expr: s.expr, dir: s.dir, flash: s.flash, aura: s.aura, alpha: s.alpha, t: T, flap: s.flap, after: s.after, rot: s.rot, rotC: s.rotC, silhouette: s.silhouette, hold: s.hold }, extra));
     return s;
   }
   draw(F, T, o = {}) {
@@ -196,15 +333,34 @@ class Fight {
       const s = this.st(h.to, h.t);
       const hy = h.at ? h.at[1] : s.y - 30 - (h.hy || 0), hx = h.at ? h.at[0] : s.x;
       if (!h.heal && !h.block && !h.noSpark) spark(c, hx + rr(this.hits.indexOf(h), 5, -4, 4), hy + rr(this.hits.indexOf(h), 6, -6, 6), lt, { size: h.big ? 1.6 : 1, col: h.col || '#ffe040', seed: h.t });
-      if (h.block) ringFx(c, hx, hy, lt, { r: 20, col: '#80ffff' });
+      if (h.block && !h.noSpark) ringFx(c, hx, hy, lt, { r: 20, col: '#80ffff' });
     }
-    // auto camera: frame the fighters with a slight zoom, punch in on big hits
+    // follow camera: frame everyone (smoothed), punch in on big hits / rush targets
     if (o.autoCam !== false) {
-      let mn = 1e9, mx = -1e9;
-      for (const id in this.F) { const b = this.base(id, T); mn = Math.min(mn, b.x); mx = Math.max(mx, b.x); }
-      let z = clamp(300 / (mx - mn + 130), 1, 1.28);
-      for (const h of this.hits) { const lt = T - h.t; if (h.big && lt >= 0 && lt < 0.35) z += 0.07 * (1 - lt / 0.35); }
-      F.cam.z = z; F.cam.x = (mn + mx) / 2; F.cam.y = H - H / (2 * z) - 6 * (z - 1);
+      let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, n = 0, cx = 0, cy = 0;
+      const ids = Object.keys(this.F).filter(id => !this.F[id].noCam);
+      for (let k = 0; k < 6; k++) {
+        const Tk = T - k * 0.06;
+        for (const id of ids) {
+          const b = this.base(id, Tk);
+          x0 = Math.min(x0, b.x); x1 = Math.max(x1, b.x); y0 = Math.min(y0, b.y - 60); y1 = Math.max(y1, b.y);
+          cx += b.x; cy += b.y - 30; n++;
+        }
+      }
+      cx = (x0 + x1) / 2; cy = (y0 + y1) / 2;
+      let z = clamp(Math.min(270 / (x1 - x0 + 110), 150 / (y1 - y0 + 60)), 1, o.maxZ || 1.5);
+      for (const zz of this.zooms) if (T >= zz.t && T < zz.t + zz.dur) {
+        const k = Math.min(prog(zz.t, zz.t + 0.15, T), 1 - prog(zz.t + zz.dur - 0.2, zz.t + zz.dur, T));
+        z = lerp(z, zz.z, k);
+        if (zz.id) { const b = this.base(zz.id, T); cx = lerp(cx, b.x, k); cy = lerp(cy, b.y - 30, k); }
+      }
+      for (const h of this.hits) { const lt = T - h.t; if (h.big && lt >= 0 && lt < 0.3) z += 0.08 * (1 - lt / 0.3); }
+      F.cam.z = z; F.cam.x = cx; F.cam.y = Math.min(cy + 8, H - H / (2 * z));
+    }
+    // impact frames
+    for (const im of this.impacts) {
+      const k = Math.floor((T - im.t) * FPS);
+      if (k >= 0 && k < im.n) F.filter = k % 2 === 0 ? 'grayscale(1) invert(1) contrast(5)' : 'grayscale(1) contrast(6) brightness(1.3)';
     }
     // camera shake
     let sh = 0;
@@ -216,12 +372,16 @@ class Fight {
       if (o.hud !== false) self.drawHUD(u, T, o);
       for (const h of self.hits) {
         const lt = T - h.t;
-        if (lt < 0 || lt > 1 || h.noNum || !h.dmg) continue;
+        if (lt < 0 || lt > 1 || h.noNum || !h.dmg || (!h.big && !h.heal && h.dmg * (h.numMul || 7.3) < 20)) continue;
         const s = self.st(h.to, h.t);
         const [nx, ny] = camXY(F, s.x + rr(self.hits.indexOf(h), 7, -8, 8), s.y - 70);
         dmgNum(u, nx, Math.max(ny, 60), Math.round(h.dmg * (h.numMul || 7.3)), lt, { heal: h.heal, crit: h.big });
       }
       self.drawCombos(u, T);
+      // only the most recent move banner is shown (a new move cuts the old one)
+      let bn = null;
+      for (const b of self.banners || []) if (b.t <= T && (!bn || b.t > bn.t)) bn = b;
+      if (bn) moveBanner(u, bn.str, T - bn.t, bn.o);
       for (const e of self.uis) if (T >= e.t0 && T < e.t1) e.fn(u, T - e.t0, T);
       for (const fl of self.flashes) { const lt = T - fl.t; if (lt >= 0 && lt < fl.dur) fade(u, fl.a * (1 - lt / fl.dur), fl.col); }
     });
@@ -296,14 +456,15 @@ const MOVE_TYPES = {
     for (let i = 0; i < n; i++) {
       const ti = t + i * gap;
       this.fx(ti, ti + fly, (c, lt, T) => {
-        const h = this.hand(by, ti + 0.02), tg = this.chest(to, ti + fly);
+        const h = this.hand(by, ti + 0.02), tg0 = this.chest(to, m.miss ? ti : ti + fly);
+        const tg = m.miss ? [tg0[0] + (tg0[0] - h[0]) * 0.8, tg0[1] + (tg0[1] - h[1]) * 0.8] : tg0;
         const k = lt / fly, yo = rr(i, 17, -10, 8);
         const x = lerp(h[0], tg[0], k), y = lerp(h[1], tg[1] + yo, k) - Math.sin(k * Math.PI) * arc;
         const dir = tg[0] > h[0] ? 1 : -1;
         if (m.trail) for (let j = 1; j < 4; j++) { const kk = Math.max(0, k - j * 0.06); disc(c, lerp(h[0], tg[0], kk), lerp(h[1], tg[1] + yo, kk) - Math.sin(kk * Math.PI) * arc, 3 - j * 0.7, m.trail); }
         PROP[prop](c, x, y, Object.assign({ t: T, dir, rot: T * 10 }, m.propOpts || {}, m.labels ? { label: m.labels[i % m.labels.length] } : {}));
       });
-      this.hit({ t: ti + fly, to, by, dmg: m.dmg / n, big: m.lastBig !== false && i === n - 1, sfx: true, vol: 0.7 });
+      if (!m.miss) this.hit({ t: ti + fly, to, by, dmg: m.dmg / n, big: m.lastBig !== false && i === n - 1, sfx: true, vol: 0.7 });
       this.A.sfx(ti, m.throwSfx || 'throw', {});
     }
   },
