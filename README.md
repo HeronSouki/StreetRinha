@@ -6,7 +6,7 @@ A ~4-minute, SNES-style anime fight, **generated entirely from code**: every pix
 
 ## Watch
 
-- **Video:** `out/street_rinha_2.mp4` (1920×1080, 30 fps, with a synthesized chiptune soundtrack)
+- **Video:** [`video/street_rinha_2_720p.mp4`](video/street_rinha_2_720p.mp4) (4:18, 720p share copy). Run `tools/render.mjs` to get the 1080p master in `out/`.
 - **Interactive player:** open `index.html` in a browser, then click **APERTE START**. Space pauses, ←/→ skip 5 s, F toggles fullscreen. You can also jump straight to a moment with `index.html#t=120`.
 
 ## The fight
