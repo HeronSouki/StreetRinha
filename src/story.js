@@ -520,7 +520,7 @@ scene('rest', 17.5, A => {
     if (lt > 5.9 && lt < 9.1) for (let i = 0; i < 2; i++) { const k = (lt * 1.2 + i * 0.5) % 1; text(c, '♪', f.base('L', lt).x + 8 + k * 8, 88 - k * 16, { col: '#ffffff', ol: '#000', alpha: 1 - k }); }
     const rk = prog(11.7, 12.9, lt) * (1 - prog(15.5, 17.0, lt));
     rift(c, 255, 70, rk, lt, { h: 100 });
-    if (rk > 0.3) text(c, 'RACHADINHA DIMENSIONAL', 240, 128, { ax: 'c', col: GR.purple, ol: '#000', alpha: clamp((rk - 0.3) * 3) * (lt < 14 ? 1 : 1 - prog(14, 14.4, lt)) });
+    if (rk > 0.3) text(c, 'RACHADINHA DIMENSIONAL', 250, 8, { ax: 'c', col: GR.purple, ol: '#000', alpha: clamp((rk - 0.3) * 3) * (lt < 14 ? 1 : 1 - prog(14, 14.4, lt)) });
     f.draw(F, lt, { hud: false, autoCam: false });
     if (lt > 9.3 && lt < 10.6) { F.cam.sx = jit(lt, 1, 2); F.cam.sy = jit(lt, 2, 2); }
     F.ui.push(u => {
