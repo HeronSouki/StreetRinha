@@ -1,0 +1,19 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Sprite Poses</title></head>
+<body style="background:#333;margin:0;color:#ddd;font-family:monospace">
+<!-- Dev viewer: every pose of one character. Use #lula, #jair, #jairSSJ, #flavio, #vorcaro, #queiroz -->
+<canvas id=c width=320 height=180 style="width:1280px;height:720px;image-rendering:pixelated"></canvas>
+<script src="../src/core.js"></script><script src="../src/chars.js"></script><script src="../src/art.js"></script>
+<script>
+const c = document.getElementById('c').getContext('2d'); c.imageSmoothingEnabled = false;
+function draw() {
+  const key = location.hash.slice(1) || 'lula';
+  R(c, 0, 0, 320, 180, '#6a88b8');
+  Object.keys(POSES).forEach((p, i) => {
+    const x = 14 + (i % 12) * 26, y = 60 + Math.floor(i / 12) * 58;
+    drawChar(c, key, x, y, { pose: p, t: 0 });
+    text(c, p.slice(0, 5), x, y + 2, { ax: 'c', col: '#fff' });
+  });
+}
+addEventListener('hashchange', draw); draw();
+</script></body></html>
