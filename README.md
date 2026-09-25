@@ -7,6 +7,7 @@ A ~3.5-minute, SNES-style DBZ / Flash-animation fight, **generated entirely from
 ## Watch
 
 - **Video:** [`video/street_rinha_2_720p.mp4`](video/street_rinha_2_720p.mp4) (720p share copy). Run `tools/render.mjs` to get the 1080p master in `out/`.
+- **Thumbnail:** [`video/thumbnail.png`](video/thumbnail.png) (1280×720). Regenerate it with `node tools/thumbnail.mjs`
 - **Interactive player:** open `index.html` in a browser, then click **APERTE START**. Space pauses, ←/→ skip 5 s, F toggles fullscreen. You can also jump straight to a moment with `index.html#t=120`.
 
 ## The fight
